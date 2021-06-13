@@ -71,3 +71,6 @@ parse:
     cpmgetpackageversion:
       pargs: 2
       spelling: CPMGetPackageVersion
+    cpmgetpackageoptions:
+      pargs: 2
+      spelling: CPMGetPackageOptions

@@ -246,7 +246,7 @@ function(CPMFindPackage)
     return()
   endif()
 
-  cpm_check_if_package_already_added(${CPM_ARGS_NAME} "${CPM_ARGS_VERSION}")
+  cpm_check_if_package_already_added(${CPM_ARGS_NAME} "${CPM_ARGS_VERSION}" "${CPM_ARGS_OPTIONS}")
   if(CPM_PACKAGE_ALREADY_ADDED)
     cpm_export_variables(${CPM_ARGS_NAME})
     return()
@@ -262,7 +262,7 @@ function(CPMFindPackage)
 endfunction()
 
 # checks if a package has been added before
-function(cpm_check_if_package_already_added CPM_ARGS_NAME CPM_ARGS_VERSION)
+function(cpm_check_if_package_already_added CPM_ARGS_NAME CPM_ARGS_VERSION CPM_ARGS_OPTIONS)
   if("${CPM_ARGS_NAME}" IN_LIST CPM_PACKAGES)
     CPMGetPackageVersion(${CPM_ARGS_NAME} CPM_PACKAGE_VERSION)
     if("${CPM_PACKAGE_VERSION}" VERSION_LESS "${CPM_ARGS_VERSION}")
@@ -271,6 +271,53 @@ function(cpm_check_if_package_already_added CPM_ARGS_NAME CPM_ARGS_VERSION)
           "${CPM_INDENT} requires a newer version of ${CPM_ARGS_NAME} (${CPM_ARGS_VERSION}) than currently included (${CPM_PACKAGE_VERSION})."
       )
     endif()
+    
+    get_property(
+      OPTIONS_ARE_DEFINED GLOBAL
+      PROPERTY CPM_PACKAGE_${CPM_ARGS_NAME}_OPTIONS
+      SET
+    )
+    if(OPTIONS_ARE_DEFINED)
+      CPMGetPackageOptions(${CPM_ARGS_NAME} CPM_ARGS_OPTIONS_DEFINED)
+      CPMGetPackageOptions(${CPM_ARGS_NAME} CPM_ARGS_OPTIONS_DEFINED_COPY)
+      foreach(OPTION ${CPM_ARGS_OPTIONS})
+        cpm_parse_option(${OPTION})
+        set(OPTION_KEY_NEW ${OPTION_KEY})
+        set(OPTION_VALUE_NEW ${OPTION_VALUE})
+        set(ITERATION "0")
+        foreach(OPTION_DEFINED ${CPM_ARGS_OPTIONS_DEFINED})
+          cpm_parse_option(${OPTION_DEFINED})
+          set(OPTION_KEY_OLD ${OPTION_KEY})
+          set(OPTION_VALUE_OLD ${OPTION_VALUE})
+          if(${OPTION_KEY_OLD} STREQUAL ${OPTION_KEY_NEW})
+            list(REMOVE_ITEM CPM_ARGS_OPTIONS_DEFINED_COPY "${OPTION_DEFINED}")
+            if(NOT ${OPTION_VALUE_OLD} STREQUAL ${OPTION_VALUE_NEW})
+              message(
+                WARNING
+                  "${CPM_INDENT} ignoring package option for ${CPM_ARGS_NAME}: ${OPTION_KEY_OLD} = ${OPTION_VALUE_NEW} (${OPTION_VALUE_OLD})"
+              )
+            endif()
+          else()
+            math(EXPR ITERATION "${ITERATION}+1")
+          endif()
+        endforeach()
+        list(LENGTH CPM_ARGS_OPTIONS_DEFINED OPTIONS_LENGTH)
+        if(${OPTIONS_LENGTH} STREQUAL ${ITERATION})
+          message(
+            WARNING
+              "${CPM_INDENT} ignoring package option for ${CPM_ARGS_NAME}: ${OPTION_KEY_NEW} = ${OPTION_VALUE_NEW}"
+          )
+        endif()
+      endforeach()
+      foreach(OPTION ${CPM_ARGS_OPTIONS_DEFINED_COPY})
+        cpm_parse_option(${OPTION})
+        message(
+          WARNING
+            "${CPM_INDENT} package option for ${CPM_ARGS_NAME}: ${OPTION_KEY} = ${OPTION_VALUE} was present in the first call."
+        )
+      endforeach()
+    endif()
+
     cpm_get_fetch_properties(${CPM_ARGS_NAME})
     set(${CPM_ARGS_NAME}_ADDED NO)
     set(CPM_PACKAGE_ALREADY_ADDED
@@ -283,6 +330,7 @@ function(cpm_check_if_package_already_added CPM_ARGS_NAME CPM_ARGS_VERSION)
         NO
         PARENT_SCOPE
     )
+    set_property(GLOBAL PROPERTY CPM_PACKAGE_${CPM_ARGS_NAME}_OPTIONS "${CPM_ARGS_OPTIONS}")
   endif()
 endfunction()
 
@@ -459,7 +507,7 @@ function(CPMAddPackage)
   endif()
 
   # Check if package has been added before
-  cpm_check_if_package_already_added(${CPM_ARGS_NAME} "${CPM_ARGS_VERSION}")
+  cpm_check_if_package_already_added(${CPM_ARGS_NAME} "${CPM_ARGS_VERSION}" "${CPM_ARGS_OPTIONS}")
   if(CPM_PACKAGE_ALREADY_ADDED)
     cpm_export_variables(${CPM_ARGS_NAME})
     return()
@@ -488,7 +536,7 @@ function(CPMAddPackage)
     CPMAddPackage(${declaration})
     cpm_export_variables(${CPM_ARGS_NAME})
     # checking again to ensure version and option compatibility
-    cpm_check_if_package_already_added(${CPM_ARGS_NAME} "${CPM_ARGS_VERSION}")
+    cpm_check_if_package_already_added(${CPM_ARGS_NAME} "${CPM_ARGS_VERSION}" "${CPM_ARGS_OPTIONS}")
     return()
   endif()
 
@@ -688,6 +736,15 @@ function(CPMGetPackageVersion PACKAGE OUTPUT)
   )
 endfunction()
 
+# retrieve the current options of the package to ${OUTPUT}
+function(CPMGetPackageOptions PACKAGE OUTPUT)
+  get_property(OPTIONS GLOBAL PROPERTY CPM_PACKAGE_${PACKAGE}_OPTIONS)
+  set(${OUTPUT}
+      "${OPTIONS}"
+      PARENT_SCOPE
+  )
+
+endfunction()
 # declares a package in FetchContent_Declare
 function(cpm_declare_fetch PACKAGE VERSION INFO)
   if(${CPM_DRY_RUN})
@@ -789,10 +846,32 @@ function(cpm_parse_option OPTION)
       "${OPTION_KEY}"
       PARENT_SCOPE
   )
-  set(OPTION_VALUE
-      "${OPTION_VALUE}"
-      PARENT_SCOPE
+  # https://cmake.org/cmake/help/latest/command/if.html#basic-expressions (1/0 is problematic)
+  if(${OPTION_VALUE} STREQUAL "YES"
+     OR ${OPTION_VALUE} STREQUAL "ON"
+     OR ${OPTION_VALUE} STREQUAL "TRUE"
+     OR ${OPTION_VALUE} STREQUAL "Y"
   )
+    set(OPTION_VALUE
+        "ON"
+        PARENT_SCOPE
+    )
+  elseif(
+    ${OPTION_VALUE} STREQUAL "NO"
+    OR ${OPTION_VALUE} STREQUAL "OFF"
+    OR ${OPTION_VALUE} STREQUAL "FALSE"
+    OR ${OPTION_VALUE} STREQUAL "N"
+  )
+    set(OPTION_VALUE
+        "OFF"
+        PARENT_SCOPE
+    )
+  else()
+    set(OPTION_VALUE
+        "${OPTION_VALUE}"
+        PARENT_SCOPE
+    )
+  endif()
 endfunction()
 
 # guesses the package version from a git tag
