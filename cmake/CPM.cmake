@@ -76,6 +76,10 @@ option(CPM_INCLUDE_ALL_IN_PACKAGE_LOCK
        "Add all packages added through CPM.cmake to the package lock"
        $ENV{CPM_INCLUDE_ALL_IN_PACKAGE_LOCK}
 )
+option(CPM_USE_NAMED_CACHE_DIRECTORIES
+       "Use additional directory of package name in cache on the most nested level."
+       $ENV{CPM_USE_NAMED_CACHE_DIRECTORIES}
+)
 
 set(CPM_VERSION
     ${CURRENT_CPM_VERSION}
@@ -533,8 +537,13 @@ function(CPMAddPackage)
     string(TOLOWER ${CPM_ARGS_NAME} lower_case_name)
     set(origin_parameters ${CPM_ARGS_UNPARSED_ARGUMENTS})
     list(SORT origin_parameters)
-    string(SHA1 origin_hash "${origin_parameters}")
-    set(download_directory ${CPM_SOURCE_CACHE}/${lower_case_name}/${origin_hash})
+    if(CPM_USE_NAMED_CACHE_DIRECTORIES)
+      string(SHA1 origin_hash "${origin_parameters};NEW_CACHE_STRUCTURE_TAG")
+      set(download_directory ${CPM_SOURCE_CACHE}/${lower_case_name}/${origin_hash}/${CPM_ARGS_NAME})
+    else()
+      string(SHA1 origin_hash "${origin_parameters}")
+      set(download_directory ${CPM_SOURCE_CACHE}/${lower_case_name}/${origin_hash})
+    endif()
     # Expand `download_directory` relative path. This is important because EXISTS doesn't work for
     # relative paths.
     get_filename_component(download_directory ${download_directory} ABSOLUTE)
